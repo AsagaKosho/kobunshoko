@@ -65,6 +65,28 @@ class IngestResult:
 # --- [1] ZIP展開 -------------------------------------------------------------
 
 
+def _restore_mangled_backslash(raw: bytes) -> bytes:
+    """Windowsのzipfileが '/' に置換した cp932 の 0x5C トレイルバイトを復元する。
+
+    zipfile は Windows でエントリ名中の os.sep（バックスラッシュ）を '/' に
+    置き換える。cp932では「表」「ソ」「申」等の2バイト目が 0x5C のため、
+    この置換で文字が破壊される。リードバイト直後の 0x2F は正規のcp932では
+    出現しない（トレイルは0x40-0x7E/0x80-0xFC）ので、機械的に 0x5C へ戻せる。
+    """
+    out = bytearray()
+    i = 0
+    while i < len(raw):
+        b = raw[i]
+        out.append(b)
+        if (0x81 <= b <= 0x9F or 0xE0 <= b <= 0xFC) and i + 1 < len(raw):
+            trail = raw[i + 1]
+            out.append(0x5C if trail == 0x2F else trail)
+            i += 2
+            continue
+        i += 1
+    return bytes(out)
+
+
 def repair_zip_name(name: str, flag_bits: int) -> str:
     """ZIPエントリ名の cp437 → cp932 修復。
 
@@ -79,7 +101,7 @@ def repair_zip_name(name: str, flag_bits: int) -> str:
     except UnicodeEncodeError:
         return name
     try:
-        return raw.decode("cp932")
+        return _restore_mangled_backslash(raw).decode("cp932")
     except UnicodeDecodeError:
         logger.warning("ZIPエントリ名のcp932修復に失敗（cp437のまま扱う）: %r", name)
         return name

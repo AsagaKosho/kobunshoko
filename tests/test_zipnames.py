@@ -11,9 +11,30 @@ def _mangle(name: str) -> str:
     return name.encode("cp932").decode("cp437")
 
 
+def _mangle_windows(name: str) -> str:
+    """Windowsの zipfile はさらにエントリ名の '\\'（os.sep）を '/' に置換する。"""
+    return _mangle(name).replace("\\", "/")
+
+
 def test_repair_mangled_name():
     original = "01_控え文書.pdf"
     assert repair_zip_name(_mangle(original), flag_bits=0) == original
+
+
+def test_repair_windows_sep_replacement():
+    # 「表」(0x95 0x5C) のように2バイト目が 0x5C の文字は、Windowsのzipfileの
+    # セパレータ置換（\ → /）で破壊される。復元できること（全OSで実行可能）
+    original = "209906019912345678/鑑文書表示用スタイルシート.xsl"
+    mangled = _mangle_windows(original)
+    # 破壊の前提確認: 表の0x5Cがセパレータ置換され '/' が本物より1つ増えている
+    assert mangled.count("/") == original.count("/") + 1
+    assert repair_zip_name(mangled, flag_bits=0) == original
+
+
+def test_repair_windows_sep_keeps_real_separators():
+    # 完結した2バイト文字の直後にある本物のセパレータは置換しない
+    original = "フォルダ/申請書類一覧表.csv"  # ダ・表とも0x5C系トレイルを含む名前
+    assert repair_zip_name(_mangle_windows(original), flag_bits=0) == original
 
 
 def test_repair_keeps_utf8_flagged_name():
